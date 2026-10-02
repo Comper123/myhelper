@@ -1,8 +1,9 @@
+import { compare } from "bcryptjs";
+import { eq } from "drizzle-orm";
 import type { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
-
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_ANON_KEY;
+import { db } from "@/db";
+import { users } from "@/db/schema";
 
 export const authOptions: NextAuthOptions = {
   session: { strategy: "jwt" },
@@ -15,16 +16,17 @@ export const authOptions: NextAuthOptions = {
         password: { label: "Пароль", type: "password" },
       },
       async authorize(credentials) {
-        if (!credentials?.email || !credentials.password || !supabaseUrl || !supabaseKey) return null;
-        const response = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", apikey: supabaseKey },
-          body: JSON.stringify({ email: credentials.email.trim(), password: credentials.password }),
-          cache: "no-store",
-        });
-        if (!response.ok) return null;
-        const result = await response.json();
-        return { id: result.user.id, email: result.user.email, name: result.user.user_metadata?.name ?? null };
+        if (!credentials?.email || !credentials.password) return null;
+
+        try {
+          const email = credentials.email.trim().toLowerCase();
+          const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+          if (!user || !(await compare(credentials.password, user.passwordHash))) return null;
+          return { id: user.id, email: user.email, name: user.name };
+        } catch (error) {
+          console.error("Credentials authorization failed:", error);
+          return null;
+        }
       },
     }),
   ],
